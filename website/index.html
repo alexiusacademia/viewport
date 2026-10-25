@@ -1,0 +1,318 @@
+<!doctype html>
+<!--
+  viewport's website: https://viewport-package.syncster.dev
+  Author: Alexius Academia
+  Date: 2026-10-26
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="author" content="Alexius Academia">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>viewport · Pan, zoom and rotate for Tessel</title>
+  <meta name="description" content="viewport is a Tessel library for pan, zoom, rotate and fit in Canvas views: world and screen coordinates, the mouse and keys, zoom boxes, smooth moves, grids, rulers and scale bars.">
+  <meta name="theme-color" content="#0b7c86">
+  <link rel="canonical" href="https://viewport-package.syncster.dev/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="viewport">
+  <meta property="og:title" content="viewport · Pan, zoom and rotate for Tessel">
+  <meta property="og:description" content="Pan, zoom, rotate and fit for Tessel Canvas views: the wheel zooms about the mouse, a drag pans, Shift-drag zooms into a box, with grids, rulers and scale bars that follow the zoom.">
+  <meta property="og:url" content="https://viewport-package.syncster.dev/">
+  <meta property="og:image" content="https://viewport-package.syncster.dev/assets/share.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="A site plan drawn with viewport, with a grid, rulers and a scale bar">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0b7c86"/><path d="M7 12 V7 H12 M20 7 H25 V12 M25 20 V25 H20 M12 25 H7 V20" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="15" cy="15" r="4.2" fill="none" stroke="#fff" stroke-width="2.2"/><path d="M18 18 L21.5 21.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>
+      viewport <small>for Tessel</small>
+    </a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#mouse" class="optional">Mouse and keys</a>
+      <a href="#reference">Reference</a>
+      <a href="https://github.com/alexiusacademia/viewport">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<div class="hero">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">A Tessel library</p>
+      <h1>Pan, zoom and rotate for Tessel canvases.</h1>
+      <p class="lede">For drawings, plans, maps, plots and pictures. A <code>Viewport</code> turns metres, pixels or degrees into points on a <code>Canvas</code> and back, and handles the mouse and keys the way drawing programs do. Grids, rulers and scale bars follow the zoom.</p>
+      <div class="install">
+        <code>tessel add viewport</code>
+        <button class="copy" type="button" data-copy="tessel add viewport">Copy</button>
+      </div>
+      <div class="buttons">
+        <a class="button primary" href="#features">See what it does</a>
+        <a class="button" href="https://github.com/alexiusacademia/viewport">Code on GitHub</a>
+      </div>
+      <p class="meta">MIT licence · Tessel 0.10 or later · no dependencies</p>
+    </div>
+    <figure class="shot">
+      <picture>
+        <source srcset="assets/app-dark.png" media="(prefers-color-scheme: dark)">
+        <img src="assets/app.png" width="1520" height="1040" alt="The example app: a site plan with a lot, a house, a garage and a street, a grid, rulers along the top and left with a blue mark at the mouse, a scale bar and a north arrow">
+      </picture>
+    </figure>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <h2>What it does</h2>
+    <p class="intro">Every picture here is the example app that comes with the library, run by Tessel without a window and saved.</p>
+
+    <div class="features2">
+
+      <article class="fcard">
+        <img src="assets/zoombox.png" width="960" height="600" loading="lazy" alt="A dashed blue box dragged over the house and the driveway of the site plan">
+        <div class="body">
+          <h3>Zoom about the mouse, or into a box</h3>
+          <p>The wheel and a pinch zoom about the point under the mouse, which stays where it is. Shift and a drag draws a box, and the view zooms smoothly until the box fills it. A double click fits the whole drawing again.</p>
+<pre class="tsl">.onPointer { e in
+    let _used = vp.handle(e)
+}</pre>
+        </div>
+      </article>
+
+      <article class="fcard">
+        <img src="assets/rotate.png" width="960" height="600" loading="lazy" alt="The site plan turned 42 degrees, with its grid and the street label turned with it">
+        <div class="body">
+          <h3>Turn the view</h3>
+          <p>A right drag turns the picture about the mouse, and "[" and "]" turn it by 15°. The grid turns with it. Fitting a box takes the angle into account. Rotation is off unless you turn it on.</p>
+<pre class="tsl">state vp = viewport.Viewport(content: plan(), rotates: true)</pre>
+        </div>
+      </article>
+
+      <article class="fcard">
+        <img src="assets/far.png" width="960" height="600" loading="lazy" alt="The site plan zoomed far out: grid lines every 100 metres and a scale bar reading 0 to 100 m">
+        <div class="body">
+          <h3>A grid that follows the zoom</h3>
+          <p>Grid lines are a round step apart (1, 2 or 5 × 10ⁿ), with fainter lines between them and the axes drawn darker. The scale bar picks a round length and switches to km or mm when the numbers get large or small.</p>
+<pre class="tsl">viewport.drawGrid(g, vp)
+viewport.drawScaleBar(g, vp, x: 16, y: g.height - 14, unit: "m")</pre>
+        </div>
+      </article>
+
+      <article class="fcard">
+        <img src="assets/rulers.png" width="960" height="600" loading="lazy" alt="Rulers along the top and left of the plan, labelled 0, 20 and 40 metres, with blue marks where the mouse is">
+        <div class="body">
+          <h3>Rulers with a mark at the mouse</h3>
+          <p>Rulers along the top and left edges, labelled in world units, with a blue mark where the mouse is. The labels use as many decimals as the step needs.</p>
+<pre class="tsl">viewport.drawRulers(g, vp, mouseX: mouseX, mouseY: mouseY)</pre>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<section id="ways">
+  <div class="wrap">
+    <h2>A whole app</h2>
+    <p class="intro">Keep a <code>Viewport</code> in a <code>state</code>, give it the canvas's size, its events and a timer, and draw. <code>apply(g)</code> lets you draw in world units. You can also convert each point with <code>toScreen</code>.</p>
+    <div class="examples">
+      <article class="example">
+        <h3>A plan in metres</h3>
+        <p>Y grows upwards, as in drawings and maps. Set <code>yDown: true</code> for pictures and pages.</p>
+<pre class="tsl">import viewport
+
+app Plan(width: 700, height: 480) {
+    state vp = viewport.Viewport(content: viewport.box(0, 0, 60, 40))
+
+    Canvas { g in
+        viewport.drawGrid(g, vp)
+        g.save()
+        vp.apply(g)                     // draw in metres from here
+        g.strokeRect(x: 10, y: 10, width: 20, height: 12, color: .blue, lineWidth: 2)
+        g.restore()
+        viewport.drawZoomBox(g, vp)
+        viewport.drawScaleBar(g, vp, x: 16, y: g.height - 14, unit: "m")
+    }
+    .onResize { w, h in vp.resize(w, h) }
+    .onPointer { e in
+        let _used = vp.handle(e)
+    }
+    .onKey { key in
+        let _used = vp.handleKey(key)
+    }
+    .onAppear {
+        every(seconds: 1.0 / 60.0) { vp.tick() }    // smooth moves
+    }
+}</pre>
+      </article>
+      <article class="example">
+        <h3>Next to your own tools</h3>
+        <p><code>handle(e)</code> returns <code>false</code> for the events it leaves alone, so the app's tools get them, with the world point under the mouse.</p>
+<pre class="tsl">state vp = viewport.Viewport(minScale: 0.01, maxScale: 1000.0,
+                             content: drawingBox(),
+                             keepInSight: true,
+                             leftDragPans: false)   // left drags draw
+
+.onPointer { e in
+    if !vp.handle(e) {
+        let (x, y) = vp.toWorld(e.x, e.y)
+        myTool(e, x, y)
+    }
+}
+
+// Snap within 8 points, whatever the zoom.
+let snap = vp.length(8.0)
+
+// Draw only what shows.
+let seen = vp.visible()
+for s in shapes {
+    if s.bounds.intersects(seen) { draw(g, s) }
+}</pre>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="mouse">
+  <div class="wrap">
+    <h2>The mouse and keys</h2>
+    <p class="intro">What <code>handle(e)</code> and <code>handleKey(key)</code> do, and the fields that change it.</p>
+    <div class="table"><table>
+      <tr><th>Input</th><th>What it does</th><th>Field</th></tr>
+      <tr><td>Wheel, two-finger scroll</td><td>Zooms about the mouse. With Cmd or Option held, it pans.</td><td><code>wheel: .pans</code> swaps the two</td></tr>
+      <tr><td>Pinch</td><td>Zooms about the mouse.</td><td></td></tr>
+      <tr><td>Left drag</td><td>Pans.</td><td><code>leftDragPans: false</code> leaves left drags to the app</td></tr>
+      <tr><td>Middle drag</td><td>Pans.</td><td></td></tr>
+      <tr><td>Shift and a left drag</td><td>Draws a zoom box and zooms into it.</td><td><code>boxZoom</code></td></tr>
+      <tr><td>Right drag</td><td>Turns the picture about the mouse.</td><td><code>rotates: true</code> (off by default)</td></tr>
+      <tr><td>Double click</td><td>Fits the content.</td><td><code>doubleClickFits</code></td></tr>
+      <tr><td><code>+</code> or <code>=</code>, <code>−</code></td><td>Zooms in and out by <code>zoomStep</code> (1.5).</td><td></td></tr>
+      <tr><td><code>0</code></td><td>Fits the content.</td><td></td></tr>
+      <tr><td>Arrows</td><td>Pan by an eighth of the canvas.</td><td></td></tr>
+      <tr><td><code>[</code> and <code>]</code></td><td>Turn by <code>rotateStep</code> (15°).</td><td><code>rotates: true</code></td></tr>
+    </table></div>
+    <p class="intro" style="margin-top:16px">Fitting, the zoom buttons and the zoom box move over a quarter of a second, fast at first and slowing at the end. A zoom keeps its fixed point still the whole way. Moves are timed by <code>tick()</code> calls, not by the clock, so headless tests run them too. With <code>smooth: false</code>, every move happens at once. Zooming with the wheel is never smoothed, so the view keeps up with the mouse.</p>
+  </div>
+</section>
+
+<section id="tested">
+  <div class="wrap">
+    <h2>Checked against a second model</h2>
+    <p class="intro">A Python program works out every view a different way, as a 3×3 matrix, for random views put through random pans, zooms, turns, resizes, fits and zoom boxes. The library has to agree with it on every value.</p>
+    <div class="stats">
+      <div class="stat"><b>33,130</b><span>checks in the library's tests, all passing</span></div>
+      <div class="stat"><b>1,500</b><span>random views put through 9,587 random moves</span></div>
+      <div class="stat"><b>22</b><span>UI checks driving the example app headless with the mouse, keys and buttons</span></div>
+      <div class="stat"><b>3</b><span>files of Tessel, nothing else to install</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="reference">
+  <div class="wrap">
+    <h2>Reference</h2>
+
+    <h3>Coordinates</h3>
+    <div class="table"><table>
+      <tr><th>Field or method</th><th></th></tr>
+      <tr><td><code>width</code>, <code>height</code></td><td>The canvas's size in points. Set them with <code>resize(w, h)</code> from <code>.onResize</code>.</td></tr>
+      <tr><td><code>centerX</code>, <code>centerY</code></td><td>The world point in the middle of the canvas.</td></tr>
+      <tr><td><code>scale</code></td><td>Points per unit of the world: 20 means a metre is drawn 20 points long.</td></tr>
+      <tr><td><code>angle</code></td><td>How far the picture is turned, counterclockwise, in radians.</td></tr>
+      <tr><td><code>yDown</code></td><td><code>false</code> (the default): y grows upwards. <code>true</code>: downwards, as in pictures.</td></tr>
+      <tr><td><code>toScreen(x, y)</code>, <code>toWorld(sx, sy)</code></td><td>A world point on the canvas, and a point of the canvas in the world.</td></tr>
+      <tr><td><code>screenX</code>, <code>screenY</code>, <code>worldX</code>, <code>worldY</code></td><td>One coordinate of those, for use inside expressions.</td></tr>
+      <tr><td><code>toScreenPoints(points)</code></td><td>Many points (<code>x, y, x, y, …</code>) on the screen, ready for <code>g.lines</code>.</td></tr>
+      <tr><td><code>points(length)</code>, <code>length(points)</code></td><td>A world length in points, and back.</td></tr>
+      <tr><td><code>visible()</code>, <code>onScreen(box)</code></td><td>The world box the canvas shows, and the screen box around a world box.</td></tr>
+      <tr><td><code>apply(g)</code></td><td>Sets the canvas's transform so that what follows is drawn in world units.</td></tr>
+    </table></div>
+
+    <h3>Moving</h3>
+    <div class="table"><table>
+      <tr><th>Method</th><th></th></tr>
+      <tr><td><code>pan(dx, dy)</code></td><td>Moves the picture by screen points.</td></tr>
+      <tr><td><code>zoom(by: f, sx, sy)</code></td><td>Zooms about a point of the canvas.</td></tr>
+      <tr><td><code>zoomCentered(by:)</code>, <code>setScale(s)</code>, <code>zoomIn()</code>, <code>zoomOut()</code></td><td>Zoom about the middle.</td></tr>
+      <tr><td><code>rotate(by: a, sx, sy)</code>, <code>setAngle(a)</code></td><td>Turn about a point, or to an angle about the middle.</td></tr>
+      <tr><td><code>centerOn(x, y)</code>, <code>show(x, y, scale, angle)</code></td><td>Go to a place.</td></tr>
+      <tr><td><code>fit(box)</code>, <code>fitContent()</code></td><td>Show all of a box, <code>margin</code> points (20) from the edges.</td></tr>
+      <tr><td><code>zoomToScreenBox(x1, y1, x2, y2)</code></td><td>Zooms into a rectangle of the canvas.</td></tr>
+      <tr><td><code>tick()</code>, <code>finish()</code>, <code>stop()</code></td><td>Run a smooth move on by a sixtieth of a second, jump to its end, or leave the view where it is.</td></tr>
+    </table></div>
+    <p class="intro" style="margin-top:14px">Limits: <code>minScale</code> and <code>maxScale</code> stop the zoom. <code>content</code> is the box around your drawing (<code>viewport.box(x1, y1, x2, y2)</code> or <code>viewport.boxAround(points)</code>). The first <code>resize</code> fits it, and with <code>keepInSight: true</code> a pan or zoom stops while <code>sight</code> points (40) of it still show.</p>
+
+    <h3>Drawing</h3>
+    <div class="table"><table>
+      <tr><th>Function</th><th></th></tr>
+      <tr><td><code>drawGrid(g, vp, spacing:, color:, minorColor:, axisColor:)</code></td><td>Grid lines at least <code>spacing</code> points (100) apart, and the axes.</td></tr>
+      <tr><td><code>drawRulers(g, vp, size:, mouseX:, mouseY:)</code></td><td>Rulers along the top and left, with a mark at the mouse. Not drawn while the view is turned.</td></tr>
+      <tr><td><code>drawScaleBar(g, vp, x:, y:, maxWidth:, unit:)</code></td><td>A map's scale bar at most <code>maxWidth</code> points (120) long.</td></tr>
+      <tr><td><code>scaleBar(vp, maxWidth:, unit:)</code></td><td>That bar's length, size in points and label, to draw your own.</td></tr>
+      <tr><td><code>drawZoomBox(g, vp)</code></td><td>The zoom box while it's dragged.</td></tr>
+      <tr><td><code>gridStep(vp, spacing:)</code>, <code>niceStep(x)</code>, <code>tickLabel(value, step:)</code></td><td>The grid's step (for snapping), a round step, and a number labelled as the rulers do.</td></tr>
+    </table></div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>viewport · MIT licence · © 2026 <a href="https://syncster.dev" rel="author">Alexius Academia</a> · <a href="mailto:admin@syncster.dev">admin@syncster.dev</a> · <a href="https://syncster.dev">syncster.dev</a></span>
+    <nav>
+      <a href="https://github.com/alexiusacademia/viewport">GitHub</a>
+      <a href="https://tessel-lang.syncster.dev">Tessel</a>
+      <a href="https://tessel-packages.syncster.dev">Libraries</a>
+      <a href="https://chart-package.syncster.dev">chart</a>
+      <a href="https://inspector-package.syncster.dev">inspector</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+// Colours the Tessel code: keywords, strings, numbers and comments.
+(function () {
+  const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const keywords = /^(import|fn|var|let|if|else|for|in|while|return|match|try|true|false|nil|app|state|struct)$/;
+  const token = /(\/\/[^\n]*)|("(?:\\.|[^"\\])*")|(\b\d+(?:\.\d+)?(?:e-?\d+)?\b)|([A-Za-z_]\w*)/g;
+  for (const pre of document.querySelectorAll("pre.tsl")) {
+    const text = pre.textContent;
+    let out = "", last = 0, m;
+    token.lastIndex = 0;
+    while ((m = token.exec(text))) {
+      out += esc(text.slice(last, m.index));
+      const t = esc(m[0]);
+      if (m[1]) out += '<span class="c">' + t + "</span>";
+      else if (m[2]) out += '<span class="s">' + t + "</span>";
+      else if (m[3]) out += '<span class="n">' + t + "</span>";
+      else if (keywords.test(m[4])) out += '<span class="k">' + t + "</span>";
+      else out += t;
+      last = token.lastIndex;
+    }
+    pre.innerHTML = out + esc(text.slice(last));
+  }
+  for (const b of document.querySelectorAll("[data-copy]")) {
+    b.addEventListener("click", () => {
+      navigator.clipboard.writeText(b.dataset.copy).then(() => {
+        b.textContent = "Copied";
+        setTimeout(() => { b.textContent = "Copy"; }, 1500);
+      }, () => {});
+    });
+  }
+})();
+</script>
+</body>
+</html>
