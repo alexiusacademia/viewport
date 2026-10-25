@@ -1,0 +1,96 @@
+// viewport: Box, a rectangle in world coordinates: what a drawing covers,
+// for fitting it in a view, or what a view shows.
+//
+// Author: Alexius Academia
+// Date: 2026-10-25
+
+// A rectangle from (minX, minY) to (maxX, maxY). An empty box (the
+// default) holds nothing yet: including a point in it gives a box of just
+// that point.
+public struct Box {
+    minX: Float = 0.0
+    minY: Float = 0.0
+    maxX: Float = 0.0
+    maxY: Float = 0.0
+    empty: Bool = true
+
+    fn width() -> Float {
+        if empty { 0.0 } else { maxX - minX }
+    }
+
+    fn height() -> Float {
+        if empty { 0.0 } else { maxY - minY }
+    }
+
+    fn centerX() -> Float {
+        (minX + maxX) / 2.0
+    }
+
+    fn centerY() -> Float {
+        (minY + maxY) / 2.0
+    }
+
+    // including(x, y)
+    //   The box grown to take in the point. Points that aren't ordinary
+    //   numbers (NaN, infinite) are left out.
+    fn including(_ x: Float, _ y: Float) -> Box {
+        if !x.isFinite || !y.isFinite {
+            return self
+        }
+        if empty {
+            return Box(minX: x, minY: y, maxX: x, maxY: y, empty: false)
+        }
+        Box(minX: min(minX, x), minY: min(minY, y), maxX: max(maxX, x), maxY: max(maxY, y), empty: false)
+    }
+
+    // union(other)
+    //   The smallest box that holds both.
+    fn union(_ other: Box) -> Box {
+        if other.empty {
+            return self
+        }
+        including(other.minX, other.minY).including(other.maxX, other.maxY)
+    }
+
+    // contains(x, y)
+    //   Whether the point is inside the box or on its edge.
+    fn contains(_ x: Float, _ y: Float) -> Bool {
+        !empty && x >= minX && x <= maxX && y >= minY && y <= maxY
+    }
+
+    // intersects(other)
+    //   Whether the two boxes share any point.
+    fn intersects(_ other: Box) -> Bool {
+        !empty && !other.empty && other.minX <= maxX && other.maxX >= minX && other.minY <= maxY && other.maxY >= minY
+    }
+
+    // padded(d)
+    //   The box grown by d on every side (shrunk, if d is negative).
+    fn padded(_ d: Float) -> Box {
+        if empty {
+            return self
+        }
+        Box(minX: minX - d, minY: minY - d, maxX: maxX + d, maxY: maxY + d, empty: false)
+    }
+}
+
+// box(x1, y1, x2, y2)
+//   The box with these two corners, in any order.
+//
+//   let site = viewport.box(0, 0, 120, 80)
+public fn box(_ x1: Float, _ y1: Float, _ x2: Float, _ y2: Float) -> Box {
+    Box().including(x1, y1).including(x2, y2)
+}
+
+// boxAround(points)
+//   The smallest box around points given as x, y, x, y, … (as
+//   Graphics.lines takes them). Empty when there are none.
+public fn boxAround(_ points: [Float]) -> Box {
+    var b = Box()
+    var k = 0
+    while k + 1 < points.count {
+        b = b.including(points[k], points[k + 1])
+        k += 2
+    }
+    b
+}

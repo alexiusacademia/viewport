@@ -1,0 +1,12 @@
+# The version of Tessel this project uses: Tessel's commands, editors and
+# the IDE run it with this version, whatever version is installed (and
+# install it the first time). `tessel pin` changes it.
+tessel = "0.10.0"
+
+# What `tessel publish` publishes. Programs use the library by this name:
+# `tessel add viewport`, then `import viewport`.
+[library]
+name = "viewport"
+version = "0.1.0"
+description = "Pan, zoom, rotate and fit for Canvas views: world/screen conversions, mouse and key handling, zoom boxes, smooth moves, grids, rulers and scale bars"
+license = "MIT"

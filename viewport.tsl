@@ -1,0 +1,663 @@
+// viewport: Viewport, which says where a world (a drawing, a map, a picture)
+// shows on a Canvas: the world point at the middle, how many points a unit
+// of the world takes, and how far the picture is turned. It turns world
+// coordinates into screen coordinates and back, pans, zooms about a point,
+// rotates, fits boxes, keeps to limits, and moves smoothly to a new place.
+//
+// Author: Alexius Academia
+// Date: 2026-10-25
+
+// What the scroll wheel (or two fingers on a trackpad) does in
+// Viewport.handle. With Cmd (Ctrl on Windows) or Option (Alt) held, it does the
+// other.
+public enum Wheel {
+    zooms
+    pans
+}
+
+// What a drag being handled is doing.
+public enum Drag {
+    none
+    pan
+    rotate
+    box
+}
+
+public struct Viewport {
+    // The size of the canvas, in points: set it from .onResize.
+    width: Float = 300.0
+    height: Float = 150.0
+    // The world point at the middle of the canvas.
+    centerX: Float = 0.0
+    centerY: Float = 0.0
+    // Points per unit of the world: 20 is a metre as 20 points.
+    scale: Float = 1.0
+    // How far the picture is turned on the screen, counterclockwise, in
+    // radians.
+    angle: Float = 0.0
+    // false (the default): world y grows upwards, as in drawings, maps and
+    // plots. true: downwards, as on the canvas, for pictures and pages.
+    yDown: Bool = false
+
+    // The limits of `scale`: zooming stops there.
+    minScale: Float = 0.000000001
+    maxScale: Float = 1000000000.0
+    // What the world has in it, for fitContent, double-click and "0", and
+    // for keepInSight. Empty: nothing is known.
+    content: Box = Box()
+    // While true (and content isn't empty), panning and zooming stop where
+    // less than `sight` points of the content would still show.
+    keepInSight: Bool = false
+    sight: Float = 40.0
+    // The room fit and fitContent leave around a box, in points.
+    margin: Float = 20.0
+    // While true, the first resize (when the canvas is first laid out)
+    // fits the content at once, if there is any.
+    fitFirst: Bool = true
+    sized: Bool = false
+
+    // What handle does with the mouse.
+    wheel: Wheel = .zooms
+    // Dragging with the left button pans (false: only the middle button
+    // does, and left drags are the app's).
+    leftDragPans: Bool = true
+    // Dragging with the right button turns the picture, and "[" and "]"
+    // turn it by `rotateStep`.
+    rotates: Bool = false
+    rotateStep: Float = 0.2617993877991494
+    // Shift and a left drag draws a box to zoom into.
+    boxZoom: Bool = true
+    // A double click (left, or middle) fits the content.
+    doubleClickFits: Bool = true
+    // How much "+" and "-", zoomIn and zoomOut zoom.
+    zoomStep: Float = 1.5
+    // Whether fits, steps and box zooms move smoothly, and how long they
+    // take, in seconds.
+    smooth: Bool = true
+    duration: Float = 0.25
+
+    // The drag being handled, and the zoom box's corners (screen points).
+    drag: Drag = .none
+    boxX0: Float = 0.0
+    boxY0: Float = 0.0
+    boxX1: Float = 0.0
+    boxY1: Float = 0.0
+
+    // A smooth move: from where, to where, since when.
+    animating: Bool = false
+    moveTime: Float = 0.0
+    moveLength: Float = 0.25
+    fromX: Float = 0.0
+    fromY: Float = 0.0
+    fromScale: Float = 1.0
+    fromAngle: Float = 0.0
+    toX: Float = 0.0
+    toY: Float = 0.0
+    toScale: Float = 1.0
+    toAngle: Float = 0.0
+
+    // --- Converting ---
+
+    // The world's y in the turned frame: flipped when yDown.
+    fn ySign() -> Float {
+        if yDown { -1.0 } else { 1.0 }
+    }
+
+    // toScreen(x, y)
+    //   Where a world point shows, in points from the canvas's top left
+    //   corner.
+    fn toScreen(_ x: Float, _ y: Float) -> (Float, Float) {
+        let dx = x - centerX
+        let dy = (y - centerY) * ySign()
+        let c = cos(angle)
+        let s = sin(angle)
+        let rx = dx * c - dy * s
+        let ry = dx * s + dy * c
+        (width / 2.0 + rx * scale, height / 2.0 - ry * scale)
+    }
+
+    // toWorld(sx, sy)
+    //   The world point that shows at a point of the canvas (as an
+    //   onPointer event's x and y give it).
+    fn toWorld(_ sx: Float, _ sy: Float) -> (Float, Float) {
+        let rx = (sx - width / 2.0) / scale
+        let ry = (height / 2.0 - sy) / scale
+        let c = cos(angle)
+        let s = sin(angle)
+        let dx = rx * c + ry * s
+        let dy = -rx * s + ry * c
+        (centerX + dx, centerY + dy * ySign())
+    }
+
+    // screenX(x, y), screenY(x, y), worldX(sx, sy), worldY(sx, sy)
+    //   One coordinate of toScreen or toWorld, for use inside expressions.
+    fn screenX(_ x: Float, _ y: Float) -> Float {
+        let (sx, _) = toScreen(x, y)
+        sx
+    }
+
+    fn screenY(_ x: Float, _ y: Float) -> Float {
+        let (_, sy) = toScreen(x, y)
+        sy
+    }
+
+    fn worldX(_ sx: Float, _ sy: Float) -> Float {
+        let (x, _) = toWorld(sx, sy)
+        x
+    }
+
+    fn worldY(_ sx: Float, _ sy: Float) -> Float {
+        let (_, y) = toWorld(sx, sy)
+        y
+    }
+
+    // toScreenPoints(points)
+    //   Many world points, given as x, y, x, y, …, on the screen, in the
+    //   same form: for Graphics.lines. NaNs stay NaNs.
+    fn toScreenPoints(_ points: [Float]) -> [Float] {
+        var out: [Float] = []
+        var k = 0
+        while k + 1 < points.count {
+            let (sx, sy) = toScreen(points[k], points[k + 1])
+            out.append(sx)
+            out.append(sy)
+            k += 2
+        }
+        out
+    }
+
+    // points(length) and length(points)
+    //   A world length in points on the screen, and back.
+    fn points(_ length: Float) -> Float {
+        length * scale
+    }
+
+    fn length(_ points: Float) -> Float {
+        points / scale
+    }
+
+    // visible()
+    //   The world box the canvas shows (when the picture is turned, the
+    //   box around what shows).
+    fn visible() -> Box {
+        var b = Box()
+        for (sx, sy) in [(0.0, 0.0), (width, 0.0), (0.0, height), (width, height)] {
+            let (x, y) = toWorld(sx, sy)
+            b = b.including(x, y)
+        }
+        b
+    }
+
+    // onScreen(box)
+    //   The screen box (in points) around a world box.
+    fn onScreen(_ b: Box) -> Box {
+        if b.empty {
+            return b
+        }
+        var out = Box()
+        for (x, y) in [(b.minX, b.minY), (b.maxX, b.minY), (b.minX, b.maxY), (b.maxX, b.maxY)] {
+            let (sx, sy) = toScreen(x, y)
+            out = out.including(sx, sy)
+        }
+        out
+    }
+
+    // apply(g)
+    //   Sets g's transform so that what follows is drawn in world
+    //   coordinates. Lines and text keep their size in points; with y up,
+    //   text comes out upside down, so draw text at toScreen's points
+    //   (after g.resetTransform()) instead.
+    fn apply(_ g: Graphics) {
+        g.translate(width / 2.0, height / 2.0)
+        g.rotate(-angle)
+        if yDown {
+            g.scale(scale, scale)
+        } else {
+            g.scale(scale, -scale)
+        }
+        g.translate(-centerX, -centerY)
+    }
+
+    // --- Moving ---
+
+    // resize(width, height)
+    //   The canvas's new size: the world point at the middle stays there.
+    //   The first time (if fitFirst), it fits the content at once.
+    fn resize(_ w: Float, _ h: Float) {
+        width = max(w, 1.0)
+        height = max(h, 1.0)
+        if !sized {
+            sized = true
+            if fitFirst && !content.empty {
+                let was = smooth
+                smooth = false
+                fitContent()
+                smooth = was
+            }
+        }
+    }
+
+    // pan(dx, dy)
+    //   Moves the picture by (dx, dy) points on the screen, as the mouse
+    //   drags it.
+    fn pan(_ dx: Float, _ dy: Float) {
+        let (x0, y0) = toWorld(0.0, 0.0)
+        let (x1, y1) = toWorld(dx, dy)
+        centerX -= x1 - x0
+        centerY -= y1 - y0
+        keepContent()
+    }
+
+    // zoom(by, sx, sy)
+    //   Zooms by `factor` (2: twice as large) about a point of the canvas:
+    //   the world point there stays there.
+    fn zoom(by: Float, _ sx: Float, _ sy: Float) {
+        if !by.isFinite || by <= 0.0 {
+            return
+        }
+        let (x, y) = toWorld(sx, sy)
+        scale = (scale * by).clamped(min: minScale, max: maxScale)
+        hold(x, y, sx, sy)
+        keepContent()
+    }
+
+    // zoomCentered(by)
+    //   Zooms about the middle of the canvas.
+    fn zoomCentered(by: Float) {
+        zoom(by: by, width / 2.0, height / 2.0)
+    }
+
+    // zoomIn(), zoomOut()
+    //   Zooms about the middle by zoomStep (smoothly, if `smooth`).
+    fn zoomIn() {
+        stepZoom(zoomStep)
+    }
+
+    fn zoomOut() {
+        stepZoom(1.0 / zoomStep)
+    }
+
+    fn stepZoom(_ f: Float) {
+        let (cx, cy, s, a) = target()
+        moveTo(cx, cy, (s * f).clamped(min: minScale, max: maxScale), a)
+    }
+
+    // setScale(s)
+    //   Zooms about the middle to `s` points per unit.
+    fn setScale(_ s: Float) {
+        zoomCentered(by: s / scale)
+    }
+
+    // rotate(by, sx, sy)
+    //   Turns the picture by `by` radians (counterclockwise) about a point
+    //   of the canvas.
+    fn rotate(by: Float, _ sx: Float, _ sy: Float) {
+        let (x, y) = toWorld(sx, sy)
+        angle = tidyAngle(angle + by)
+        hold(x, y, sx, sy)
+        keepContent()
+    }
+
+    // setAngle(a)
+    //   Turns the picture to `a` radians about the middle of the canvas.
+    fn setAngle(_ a: Float) {
+        rotate(by: a - angle, width / 2.0, height / 2.0)
+    }
+
+    // centerOn(x, y)
+    //   Puts a world point in the middle of the canvas (smoothly, if
+    //   `smooth`).
+    fn centerOn(_ x: Float, _ y: Float) {
+        let (_, s, _, a) = target()
+        moveTo(x, y, s, a)
+    }
+
+    // fit(box)
+    //   Zooms and pans so that all of the box shows, `margin` points from
+    //   the edges, in the middle (smoothly, if `smooth`). A box of one
+    //   point only pans to it.
+    fn fit(_ b: Box) {
+        if b.empty {
+            return
+        }
+        let (_, _, current, a) = target()
+        // The box's size across and up the screen, turned.
+        let c = abs(cos(a))
+        let s = abs(sin(a))
+        let across = b.width() * c + b.height() * s
+        let up = b.width() * s + b.height() * c
+        let roomX = max(width - 2.0 * margin, 1.0)
+        let roomY = max(height - 2.0 * margin, 1.0)
+        var next = current
+        if across > 0.0 && up > 0.0 {
+            next = min(roomX / across, roomY / up)
+        } else if across > 0.0 {
+            next = roomX / across
+        } else if up > 0.0 {
+            next = roomY / up
+        }
+        moveTo(b.centerX(), b.centerY(), next.clamped(min: minScale, max: maxScale), a)
+    }
+
+    // fitContent()
+    //   fit(content).
+    fn fitContent() {
+        fit(content)
+    }
+
+    // zoomToScreenBox(x1, y1, x2, y2)
+    //   Zooms into a rectangle of the canvas (in points, two corners in any
+    //   order), as the zoom box does (smoothly, if `smooth`).
+    fn zoomToScreenBox(_ x1: Float, _ y1: Float, _ x2: Float, _ y2: Float) {
+        let w = abs(x2 - x1)
+        let h = abs(y2 - y1)
+        if w < 1.0 || h < 1.0 {
+            return
+        }
+        let (cx, cy) = toWorld((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+        let next = (scale * min(width / w, height / h)).clamped(min: minScale, max: maxScale)
+        moveTo(cx, cy, next, angle)
+    }
+
+    // show(x, y, scale, angle)
+    //   Goes to a place: the world point at the middle, the scale and the
+    //   angle (smoothly, if `smooth`).
+    fn show(_ x: Float, _ y: Float, _ s: Float, _ a: Float) {
+        moveTo(x, y, s.clamped(min: minScale, max: maxScale), tidyAngle(a))
+    }
+
+    // Moves the center so that world (x, y) shows at screen (sx, sy).
+    fn hold(_ x: Float, _ y: Float, _ sx: Float, _ sy: Float) {
+        let (nx, ny) = toWorld(sx, sy)
+        centerX += x - nx
+        centerY += y - ny
+    }
+
+    // While keepInSight, pans back so that `sight` points of the content
+    // (or all of it, if it's smaller) show on each axis.
+    fn keepContent() {
+        if !keepInSight || content.empty {
+            return
+        }
+        let b = onScreen(content)
+        let needX = min(sight, b.width())
+        let needY = min(sight, b.height())
+        var dx = 0.0
+        var dy = 0.0
+        if b.maxX < needX {
+            dx = needX - b.maxX
+        } else if b.minX > width - needX {
+            dx = width - needX - b.minX
+        }
+        if b.maxY < needY {
+            dy = needY - b.maxY
+        } else if b.minY > height - needY {
+            dy = height - needY - b.minY
+        }
+        if dx != 0.0 || dy != 0.0 {
+            let (x0, y0) = toWorld(0.0, 0.0)
+            let (x1, y1) = toWorld(dx, dy)
+            centerX -= x1 - x0
+            centerY -= y1 - y0
+        }
+    }
+
+    // --- The mouse and keys ---
+
+    // handle(e)
+    //   Does what the mouse does to the vp, for a Canvas's onPointer:
+    //   the wheel zooms about the mouse (or pans, as `wheel` says; Cmd or
+    //   Option does the other), a pinch zooms, a left drag (if
+    //   leftDragPans) or a middle drag pans, Shift and a left drag zooms
+    //   into a box (if boxZoom), a right drag turns (if rotates), and a
+    //   double click fits the content (if doubleClickFits). Gives true if
+    //   it used the event, false if it's the app's (a move, a left drag
+    //   when not leftDragPans, …).
+    //
+    //   .onPointer { e in
+    //       if !vp.handle(e) {
+    //           // the app's own tools
+    //       }
+    //   }
+    fn handle(_ e: PointerEvent) -> Bool {
+        match e.kind {
+            .scroll -> {
+                stop()
+                let zooms = (wheel == .zooms) != (e.command || e.alt)
+                if zooms {
+                    zoom(by: exp(-e.dy * 0.005).clamped(min: 0.5, max: 2.0), e.x, e.y)
+                } else {
+                    pan(-e.dx, -e.dy)
+                }
+                return true
+            }
+            .pinch -> {
+                stop()
+                zoom(by: max(1.0 + e.dy, 0.2), e.x, e.y)
+                return true
+            }
+            .down -> {
+                return pressed(e)
+            }
+            .drag -> {
+                return dragged(e)
+            }
+            .up -> {
+                let was = drag
+                drag = .none
+                if was == .box {
+                    zoomToScreenBox(boxX0, boxY0, boxX1, boxY1)
+                }
+                return was != .none
+            }
+            _ -> {
+                return false
+            }
+        }
+    }
+
+    fn pressed(_ e: PointerEvent) -> Bool {
+        let fits = doubleClickFits && e.clicks >= 2 && !content.empty
+        if e.button == .middle {
+            stop()
+            if fits {
+                fitContent()
+            }
+            drag = .pan
+            return true
+        }
+        if e.button == .right {
+            if !rotates {
+                return false
+            }
+            stop()
+            drag = .rotate
+            return true
+        }
+        if e.shift && boxZoom {
+            stop()
+            drag = .box
+            boxX0 = e.x
+            boxY0 = e.y
+            boxX1 = e.x
+            boxY1 = e.y
+            return true
+        }
+        if !leftDragPans {
+            return false
+        }
+        stop()
+        if fits {
+            fitContent()
+        }
+        drag = .pan
+        true
+    }
+
+    fn dragged(_ e: PointerEvent) -> Bool {
+        match drag {
+            .pan -> {
+                pan(e.dx, e.dy)
+            }
+            .rotate -> {
+                // The turn of the mouse about the middle of the canvas.
+                let a0 = atan2(height / 2.0 - (e.y - e.dy), (e.x - e.dx) - width / 2.0)
+                let a1 = atan2(height / 2.0 - e.y, e.x - width / 2.0)
+                rotate(by: tidyAngle(a1 - a0), width / 2.0, height / 2.0)
+            }
+            .box -> {
+                boxX1 = e.x
+                boxY1 = e.y
+            }
+            .none -> {
+                return false
+            }
+        }
+        true
+    }
+
+    // zoomBox()
+    //   The zoom box being dragged, in screen points, or an empty box.
+    fn zoomBox() -> Box {
+        if drag != .box {
+            return Box()
+        }
+        box(boxX0, boxY0, boxX1, boxY1)
+    }
+
+    // handleKey(key)
+    //   Does what a key does to the vp, for onKey: "+" (or "=") and "-"
+    //   zoom in and out, "0" fits the content, the arrows pan by an eighth
+    //   of the canvas, and "[" and "]" turn by rotateStep (if rotates).
+    //   Gives true if it used the key.
+    fn handleKey(_ key: String) -> Bool {
+        match key {
+            "+", "=" -> zoomIn()
+            "-" -> zoomOut()
+            "0" -> {
+                if content.empty {
+                    return false
+                }
+                fitContent()
+            }
+            "left" -> pan(width / 8.0, 0.0)
+            "right" -> pan(-width / 8.0, 0.0)
+            "up" -> pan(0.0, height / 8.0)
+            "down" -> pan(0.0, -height / 8.0)
+            "[", "]" -> {
+                if !rotates {
+                    return false
+                }
+                let (cx, cy, s, a) = target()
+                let by = if key == "[" { rotateStep } else { -rotateStep }
+                moveTo(cx, cy, s, tidyAngle(a + by))
+            }
+            _ -> {
+                return false
+            }
+        }
+        true
+    }
+
+    // --- Smooth moves ---
+
+    // Where the view is going: the end of the smooth move, or where it is.
+    fn target() -> (Float, Float, Float, Float) {
+        if animating {
+            return (toX, toY, toScale, toAngle)
+        }
+        (centerX, centerY, scale, angle)
+    }
+
+    // Goes to a place, smoothly if `smooth`.
+    fn moveTo(_ x: Float, _ y: Float, _ s: Float, _ a: Float) {
+        if !smooth || duration <= 0.0 {
+            animating = false
+            centerX = x
+            centerY = y
+            scale = s
+            angle = a
+            keepContent()
+            return
+        }
+        fromX = centerX
+        fromY = centerY
+        fromScale = scale
+        fromAngle = angle
+        toX = x
+        toY = y
+        toScale = s
+        toAngle = a
+        moveTime = 0.0
+        moveLength = duration
+        animating = true
+    }
+
+    // tick(seconds)
+    //   Takes a smooth move on by `seconds` (a sixtieth of a second unless
+    //   you say). Call it from a timer, as in
+    //   `every(seconds: 1.0 / 60.0) { vp.tick() }`: it changes nothing
+    //   while no move is under way.
+    fn tick(seconds: Float = 0.016666666666666666) {
+        if !animating {
+            return
+        }
+        moveTime += seconds
+        let t = (moveTime / moveLength).clamped(min: 0.0, max: 1.0)
+        // (A move of 0.25 s ends on its 15th tick, though 15 sixtieths add
+        // up to a hair less.)
+        if t >= 0.999999 {
+            finish()
+            return
+        }
+        // Fast at first, slowing at the end.
+        let e = 1.0 - pow(1.0 - t, 3.0)
+        let s = exp(log(fromScale) + (log(toScale) - log(fromScale)) * e)
+        let turn = tidyAngle(toAngle - fromAngle)
+        if abs(log(toScale / fromScale)) > 0.000001 && abs(turn) < 0.000000001 {
+            // A zoom: the world point that shows at the same place before
+            // and after stays there all along.
+            let px = (fromX * fromScale - toX * toScale) / (fromScale - toScale)
+            let py = (fromY * fromScale - toY * toScale) / (fromScale - toScale)
+            centerX = px - (px - fromX) * fromScale / s
+            centerY = py - (py - fromY) * fromScale / s
+        } else {
+            centerX = fromX + (toX - fromX) * e
+            centerY = fromY + (toY - fromY) * e
+        }
+        scale = s
+        angle = tidyAngle(fromAngle + turn * e)
+    }
+
+    // finish()
+    //   Ends a smooth move where it was going.
+    fn finish() {
+        if !animating {
+            return
+        }
+        animating = false
+        centerX = toX
+        centerY = toY
+        scale = toScale
+        angle = toAngle
+        keepContent()
+    }
+
+    // stop()
+    //   Ends a smooth move where it is now.
+    fn stop() {
+        animating = false
+    }
+}
+
+// An angle from -pi to pi.
+fn tidyAngle(_ a: Float) -> Float {
+    if !a.isFinite {
+        return 0.0
+    }
+    var t = a - 2.0 * pi * floor((a + pi) / (2.0 * pi))
+    if t >= pi {
+        t -= 2.0 * pi
+    }
+    t
+}

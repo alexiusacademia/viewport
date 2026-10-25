@@ -1,0 +1,273 @@
+// viewport: what's drawn with a viewport: a grid that suits the zoom, rulers
+// along the canvas's edges, a scale bar, and the zoom box being dragged.
+// Steps are round numbers, 1, 2 or 5 times a power of ten.
+//
+// Author: Alexius Academia
+// Date: 2026-10-25
+
+// niceStep(at least)
+//   The smallest round number (1, 2 or 5 times a power of ten) that is at
+//   least `x`: niceStep(37) is 50.
+public fn niceStep(_ x: Float) -> Float {
+    if !x.isFinite || x <= 0.0 {
+        return 1.0
+    }
+    let p = pow(10.0, floor(log10(x)))
+    for m in [1.0, 2.0, 5.0, 10.0] {
+        if m * p >= x * (1.0 - 1e-9) {
+            return m * p
+        }
+    }
+    10.0 * p
+}
+
+// The largest round number that is at most x: 37 gives 20.
+fn niceBelow(_ x: Float) -> Float {
+    if !x.isFinite || x <= 0.0 {
+        return 1.0
+    }
+    let p = pow(10.0, floor(log10(x)))
+    for m in [5.0, 2.0, 1.0] {
+        if m * p <= x * (1.0 + 1e-9) {
+            return m * p
+        }
+    }
+    p
+}
+
+// How many parts a step is cut into for the small lines: 5 for 1 and 5,
+// 4 for 2.
+fn parts(_ step: Float) -> Int {
+    let m = step / pow(10.0, floor(log10(step)))
+    if abs(m - 2.0) < 0.01 { 4 } else { 5 }
+}
+
+// gridStep(vp, spacing)
+//   The world distance between a grid's (or rulers') main lines: a round
+//   number, at least `spacing` points on the screen.
+public fn gridStep(_ vp: Viewport, spacing: Float = 100.0) -> Float {
+    niceStep(spacing / vp.scale)
+}
+
+// tickLabel(value, step)
+//   A tick's value as text, with as many decimals as the step needs (0.25:
+//   two), and like 2.5e6 when it's very large or small.
+public fn tickLabel(_ value: Float, step: Float) -> String {
+    var decimals = 0
+    if step > 0.0 && step.isFinite {
+        var scaled = step
+        while decimals < 6 && abs(scaled - round(scaled)) > 1e-6 * scaled {
+            decimals += 1
+            scaled *= 10.0
+        }
+    }
+    // Next to its neighbours, a value smaller than a millionth of the step
+    // is 0.
+    if value == 0.0 || abs(value) < step * 1e-6 {
+        return 0.0.formatted(decimals: decimals)
+    }
+    let size = abs(value)
+    if size >= 1e6 || size < 1e-4 {
+        return scientific(value)
+    }
+    value.formatted(decimals: decimals)
+}
+
+// v as a mantissa and a power of ten, like 2.5e6 or -1e-5.
+fn scientific(_ v: Float) -> String {
+    var e = floor(log10(abs(v)))
+    var m = v / pow(10.0, e)
+    if abs(round(m * 1000.0) / 1000.0) >= 10.0 {
+        e += 1.0
+        m = m / 10.0
+    }
+    var text = m.formatted(decimals: 3)
+    while text.hasSuffix("0") {
+        text = text.substring(from: 0, to: text.count - 1)
+    }
+    if text.hasSuffix(".") {
+        text = text.substring(from: 0, to: text.count - 1)
+    }
+    "{text}e{Int(e)}"
+}
+
+// The multiples of step from lo to hi (at most `most` of them).
+fn multiples(_ lo: Float, _ hi: Float, _ step: Float, most: Int = 4000) -> [Float] {
+    var out: [Float] = []
+    let first = ceil(lo / step - 1e-9)
+    let last = floor(hi / step + 1e-9)
+    if !first.isFinite || !last.isFinite || last - first > Float(most) {
+        return out
+    }
+    var k = first
+    while k <= last {
+        out.append(k * step)
+        k += 1.0
+    }
+    out
+}
+
+// drawGrid(g, vp, spacing:, color:, minorColor:, axisColor:)
+//   A grid in world coordinates, turned with the vp: main lines a round
+//   step apart (at least `spacing` points), fainter lines between them
+//   (none if minorColor is .clear), and the x and y axes (none if
+//   axisColor is .clear).
+public fn drawGrid(_ g: Graphics, _ vp: Viewport, spacing: Float = 100.0, color: Color = .separator, minorColor: Color = .rgba(128, 128, 128, 0.12), axisColor: Color = .gray) {
+    let b = vp.visible()
+    let step = gridStep(vp, spacing: spacing)
+    let minor = step / Float(parts(step))
+    if minorColor != .clear {
+        gridLines(g, vp, b, minor, minorColor, skip: step)
+    }
+    gridLines(g, vp, b, step, color, skip: 0.0)
+    if axisColor != .clear {
+        if b.minY <= 0.0 && b.maxY >= 0.0 {
+            worldLine(g, vp, b.minX, 0.0, b.maxX, 0.0, axisColor)
+        }
+        if b.minX <= 0.0 && b.maxX >= 0.0 {
+            worldLine(g, vp, 0.0, b.minY, 0.0, b.maxY, axisColor)
+        }
+    }
+}
+
+// The lines of a grid `step` apart across box b, leaving out those on
+// multiples of `skip` (the main lines, drawn by themselves).
+fn gridLines(_ g: Graphics, _ vp: Viewport, _ b: Box, _ step: Float, _ color: Color, skip: Float) {
+    for x in multiples(b.minX, b.maxX, step) {
+        if !onMultiple(x, skip) {
+            worldLine(g, vp, x, b.minY, x, b.maxY, color)
+        }
+    }
+    for y in multiples(b.minY, b.maxY, step) {
+        if !onMultiple(y, skip) {
+            worldLine(g, vp, b.minX, y, b.maxX, y, color)
+        }
+    }
+}
+
+fn onMultiple(_ v: Float, _ step: Float) -> Bool {
+    if step <= 0.0 {
+        return false
+    }
+    let k = v / step
+    abs(k - round(k)) < 1e-6
+}
+
+fn worldLine(_ g: Graphics, _ vp: Viewport, _ x1: Float, _ y1: Float, _ x2: Float, _ y2: Float, _ color: Color) {
+    let (a, b) = vp.toScreen(x1, y1)
+    let (c, d) = vp.toScreen(x2, y2)
+    g.line(a, b, c, d, color: color, width: 1.0)
+}
+
+// drawRulers(g, vp, size:, spacing:, color:, background:, mouseX:, mouseY:)
+//   Rulers along the top and left edges of the canvas, `size` points
+//   thick, with the world x across the top and y down the side, labelled
+//   at round steps. With mouseX and mouseY (screen points, from the
+//   pointer), a mark shows where the mouse is on each. Rulers only make
+//   sense while the picture isn't turned: with an angle, nothing is drawn.
+public fn drawRulers(_ g: Graphics, _ vp: Viewport, size: Float = 20.0, spacing: Float = 80.0, color: Color = .secondary, background: Color = .sidebar, mouseX: Float = -1.0, mouseY: Float = -1.0) {
+    if abs(vp.angle) > 1e-9 {
+        return
+    }
+    let w = vp.width
+    let h = vp.height
+    let step = gridStep(vp, spacing: spacing)
+    let small = step / Float(parts(step))
+    let b = vp.visible()
+    g.fillRect(x: 0, y: 0, width: w, height: size, color: background)
+    g.fillRect(x: 0, y: 0, width: size, height: h, color: background)
+    g.line(0, size, w, size, color: .separator, width: 1.0)
+    g.line(size, 0, size, h, color: .separator, width: 1.0)
+    // Across the top: x.
+    for x in multiples(b.minX, b.maxX, small) {
+        let sx = vp.screenX(x, vp.centerY)
+        if sx < size {
+            continue
+        }
+        let main = onMultiple(x, step)
+        let tick = if main { size * 0.6 } else { size * 0.25 }
+        g.line(sx, size - tick, sx, size, color: color, width: 1.0)
+        if main {
+            g.text(tickLabel(x, step: step), x: sx + 3.0, y: 2.0, size: 10.0, color: color)
+        }
+    }
+    // Down the side: y, the labels turned to read upwards.
+    for y in multiples(b.minY, b.maxY, small) {
+        let sy = vp.screenY(vp.centerX, y)
+        if sy < size {
+            continue
+        }
+        let main = onMultiple(y, step)
+        let tick = if main { size * 0.6 } else { size * 0.25 }
+        g.line(size - tick, sy, size, sy, color: color, width: 1.0)
+        // A label is left out where it would run under the corner.
+        let label = tickLabel(y, step: step)
+        if main && sy - 3.0 - g.textWidth(label, size: 10.0) >= size {
+            g.text(label, x: 2.0, y: sy - 3.0, size: 10.0, color: color, angle: -pi / 2.0)
+        }
+    }
+    if mouseX >= size && mouseX <= w {
+        g.line(mouseX, 0, mouseX, size, color: .blue, width: 1.0)
+    }
+    if mouseY >= size && mouseY <= h {
+        g.line(0, mouseY, size, mouseY, color: .blue, width: 1.0)
+    }
+    g.fillRect(x: 0, y: 0, width: size, height: size, color: background)
+}
+
+// What a scale bar shows: a round world length, how long it is on the
+// screen, and its label.
+public struct ScaleBar {
+    length: Float
+    points: Float
+    label: String
+}
+
+// scaleBar(vp, maxWidth:, unit:)
+//   The longest round length (1, 2 or 5 times a power of ten) that is at
+//   most maxWidth points on the screen, labelled with `unit`. With unit
+//   "m", lengths of 1000 m or more are written in km and those under a
+//   centimetre in mm.
+public fn scaleBar(_ vp: Viewport, maxWidth: Float = 120.0, unit: String = "") -> ScaleBar {
+    let length = niceBelow(maxWidth / vp.scale)
+    ScaleBar(length: length, points: length * vp.scale, label: lengthLabel(length, unit))
+}
+
+fn lengthLabel(_ length: Float, _ unit: String) -> String {
+    if unit == "m" && length >= 1000.0 {
+        return "{tickLabel(length / 1000.0, step: length / 1000.0)} km"
+    }
+    if unit == "m" && length < 0.01 {
+        return "{tickLabel(length * 1000.0, step: length * 1000.0)} mm"
+    }
+    let text = tickLabel(length, step: length)
+    if unit == "" { text } else { "{text} {unit}" }
+}
+
+// drawScaleBar(g, vp, x:, y:, maxWidth:, unit:, color:)
+//   A map's scale bar with its left end at (x, y) on the canvas (the
+//   bottom of the bar): two halves, one filled, with "0" and the length
+//   above the ends.
+public fn drawScaleBar(_ g: Graphics, _ vp: Viewport, x: Float, y: Float, maxWidth: Float = 120.0, unit: String = "", color: Color = .primary) {
+    let bar = scaleBar(vp, maxWidth: maxWidth, unit: unit)
+    let half = bar.points / 2.0
+    g.fillRect(x: x, y: y - 5.0, width: bar.points, height: 5.0, color: .background)
+    g.fillRect(x: x, y: y - 5.0, width: half, height: 5.0, color: color)
+    g.strokeRect(x: x, y: y - 5.0, width: bar.points, height: 5.0, color: color)
+    g.text("0", x: x, y: y - 8.0, size: 11.0, color: color, align: .bottom, halo: .background, haloWidth: 2.0)
+    g.text(bar.label, x: x + bar.points, y: y - 8.0, size: 11.0, color: color, align: .bottom, halo: .background, haloWidth: 2.0)
+}
+
+// drawZoomBox(g, vp, color:)
+//   The box being dragged to zoom into (Shift and a left drag), if one
+//   is.
+public fn drawZoomBox(_ g: Graphics, _ vp: Viewport, color: Color = .blue) {
+    let b = vp.zoomBox()
+    if b.empty {
+        return
+    }
+    g.fillRect(x: b.minX, y: b.minY, width: b.width(), height: b.height(), color: .rgba(52, 120, 246, 0.12))
+    g.beginPath()
+    g.rect(x: b.minX, y: b.minY, width: b.width(), height: b.height())
+    g.stroke(color, width: 1.0, dash: [4, 3])
+}

@@ -1,0 +1,142 @@
+// viewport's example: a site plan to pan, zoom, turn and fit. The wheel
+// zooms about the mouse, a drag pans, Shift and a drag zooms into a box, a
+// right drag turns, a double click (or "0") fits the plan, "+" and "-"
+// zoom, the arrows pan, and "[" and "]" turn. Grid, rulers and a scale bar
+// follow the zoom.
+// `tessel run examples` opens it.
+//
+// Author: Alexius Academia
+// Date: 2026-10-25
+
+import ".."
+
+// The lot's corners, in metres (x east, y north).
+fn lot() -> [Float] {
+    [0, 0, 64, 0, 64, 30, 52, 44, 0, 44]
+}
+
+fn trees() -> [Float] {
+    [6, 36, 10, 30, 44, 36, 58, 8, 56, 22, 6, 6]
+}
+
+// What fits show: the lot and the street, with a little room.
+fn plan() -> viewport.Box {
+    viewport.boxAround(lot()).union(viewport.box(-4, -14, 68, -4)).padded(2)
+}
+
+fn drawPlan(_ g: Graphics, _ vp: viewport.Viewport, grid: Bool, rulers: Bool, mouseX: Float, mouseY: Float) {
+    g.fillRect(x: 0, y: 0, width: g.width, height: g.height, color: .background)
+    if grid {
+        viewport.drawGrid(g, vp)
+    }
+    // The plan, drawn in metres.
+    g.save()
+    vp.apply(g)
+    // The street along the south side.
+    g.fillRect(x: -40, y: -14, width: 144, height: 10, color: .rgba(142, 142, 147, 0.25))
+    g.line(-40, -9, 104, -9, color: .gray, width: 1.0)
+    // The lot.
+    g.beginPath()
+    g.lines(lot(), closed: true)
+    g.fill(.rgba(52, 199, 89, 0.10))
+    g.stroke(.green, width: 2.0, dash: [8, 4])
+    // The house and the garage.
+    g.beginPath()
+    g.rect(x: 14, y: 12, width: 22, height: 14)
+    g.fill(.rgba(52, 120, 246, 0.22))
+    g.stroke(.blue, width: 2.0)
+    g.beginPath()
+    g.rect(x: 40, y: 12, width: 8, height: 7)
+    g.fill(.rgba(255, 149, 0, 0.22))
+    g.stroke(.orange, width: 2.0)
+    // The driveway.
+    g.beginPath()
+    g.lines([41, 0, 47, 0, 47, 12, 41, 12], closed: true)
+    g.fill(.rgba(142, 142, 147, 0.30))
+    var k = 0
+    let t = trees()
+    while k + 1 < t.count {
+        g.fillCircle(x: t[k], y: t[k + 1], radius: 2.2, color: .rgba(52, 199, 89, 0.45))
+        k += 2
+    }
+    g.restore()
+    // Text at the screen points of the plan's places, so it reads upright.
+    g.text("House", x: vp.screenX(25, 19), y: vp.screenY(25, 19), size: 13, weight: .semibold, align: .center)
+    g.text("Garage", x: vp.screenX(44, 15.5), y: vp.screenY(44, 15.5), size: 11, align: .center)
+    g.text("Mabini Street", x: vp.screenX(32, -9), y: vp.screenY(32, -9), size: 11, color: .secondary, align: .center,
+           angle: -vp.angle, halo: .background, haloWidth: 2)
+    viewport.drawZoomBox(g, vp)
+    let edge = if rulers { 20.0 } else { 0.0 }
+    if rulers {
+        viewport.drawRulers(g, vp, mouseX: mouseX, mouseY: mouseY)
+    }
+    viewport.drawScaleBar(g, vp, x: edge + 16, y: g.height - 14, unit: "m")
+    drawNorth(g, vp, x: g.width - 30, y: edge + 34)
+}
+
+// An arrow pointing north (the world's +y), turned with the plan.
+fn drawNorth(_ g: Graphics, _ vp: viewport.Viewport, x: Float, y: Float) {
+    let a = vp.angle
+    let ux = -sin(a)
+    let uy = -cos(a)
+    g.beginPath()
+    g.moveTo(x + ux * 14, y + uy * 14)
+    g.lineTo(x - uy * 6 - ux * 8, y + ux * 6 - uy * 8)
+    g.lineTo(x + uy * 6 - ux * 8, y - ux * 6 - uy * 8)
+    g.closePath()
+    g.fill(.primary)
+    g.text("N", x: x - ux * 20, y: y - uy * 20, size: 11, weight: .semibold, align: .center)
+}
+
+fn status(_ vp: viewport.Viewport, mouseX: Float, mouseY: Float) -> String {
+    let (x, y) = vp.toWorld(mouseX, mouseY)
+    let deg = vp.angle * 180.0 / pi
+    "mouse {x.formatted(decimals: 2)}, {y.formatted(decimals: 2)} m · center {vp.centerX.formatted(decimals: 2)}, {vp.centerY.formatted(decimals: 2)} · {vp.scale.formatted(decimals: 3)} pt/m · {deg.formatted(decimals: 1)}°"
+}
+
+app SitePlan(title: "viewport", width: 760, height: 520) {
+    state vp = viewport.Viewport(content: plan(), rotates: true)
+    state grid = true
+    state rulers = true
+    state mouseX = 0.0
+    state mouseY = 0.0
+
+    VStack(spacing: 0) {
+        HStack(spacing: 8) {
+            Button("Fit") { vp.fitContent() }
+            Button("+") { vp.zoomIn() }
+            Button("−") { vp.zoomOut() }
+            Button("North up") { vp.show(vp.centerX, vp.centerY, vp.scale, 0) }
+            Toggle("Grid", isOn: grid)
+            Toggle("Rulers", isOn: rulers)
+            Toggle("Keep in sight", isOn: vp.keepInSight)
+            Toggle("Smooth", isOn: vp.smooth)
+            Spacer()
+        }
+        .padding(8)
+        Divider()
+        Canvas { g in
+            drawPlan(g, vp, grid: grid, rulers: rulers, mouseX: mouseX, mouseY: mouseY)
+        }
+        .onResize { w, h in vp.resize(w, h) }
+        .onPointer { e in
+            if e.kind == .move || e.kind == .drag {
+                mouseX = e.x
+                mouseY = e.y
+            }
+            let _used = vp.handle(e)
+        }
+        .onKey { key in
+            let _used = vp.handleKey(key)
+        }
+        Divider()
+        Text(status(vp, mouseX: mouseX, mouseY: mouseY))
+            .font(size: 12)
+            .color(.secondary)
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .onAppear {
+        every(seconds: 1.0 / 60.0) { vp.tick() }
+    }
+}

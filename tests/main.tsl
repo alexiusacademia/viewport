@@ -1,0 +1,466 @@
+// viewport's tests. First, 1500 random views put through random pans,
+// zooms, turns, resizes, fits and zoom boxes, checked against cases.json
+// (made by tools/oracle/oracle.py, which works each view out as a matrix).
+// Then the rest by hand: boxes, the mouse and keys, smooth moves, limits,
+// round steps, labels and scale bars.
+// `tessel run tests` prints the failures and a count, and exits with 1 if
+// any check failed.
+//
+// Author: Alexius Academia
+// Date: 2026-10-25
+
+import ".."
+
+struct Step {
+    op: String
+    args: [Float]
+}
+
+struct Case {
+    width: Float
+    height: Float
+    centerX: Float
+    centerY: Float
+    scale: Float
+    angle: Float
+    yDown: Bool
+    content: [Float]
+    keepInSight: Bool
+    steps: [Step]
+    worlds: [[Float]]
+    toScreen: [[Float]]
+    screens: [[Float]]
+    toWorld: [[Float]]
+    endCenterX: Float
+    endCenterY: Float
+    endScale: Float
+    endAngle: Float
+}
+
+struct Cases {
+    cases: [Case]
+}
+
+// The checks made and the ones that failed.
+struct Tally {
+    failures: Int = 0
+    checks: Int = 0
+
+    fn fail(_ what: String) {
+        failures += 1
+        if failures <= 40 {
+            print("FAIL {what}")
+        }
+    }
+
+    fn check(_ what: String, _ got: Float, _ want: Float, size: Float = 1.0) {
+        checks += 1
+        if !near(got, want, size: size) {
+            fail("{what}: got {got}, want {want}")
+        }
+    }
+
+    fn checkTrue(_ what: String, _ ok: Bool) {
+        checks += 1
+        if !ok {
+            fail(what)
+        }
+    }
+
+    fn checkText(_ what: String, _ got: String, _ want: String) {
+        checks += 1
+        if got != want {
+            fail("{what}: got \"{got}\", want \"{want}\"")
+        }
+    }
+}
+
+// Whether a and b agree to about 1e-7 of their size (or of `size`).
+fn near(_ a: Float, _ b: Float, size: Float = 1.0) -> Bool {
+    abs(a - b) <= 1e-7 * max(max(abs(a), abs(b)), size)
+}
+
+fn angleGap(_ a: Float, _ b: Float) -> Float {
+    var d = a - b
+    while d > pi {
+        d -= 2.0 * pi
+    }
+    while d < -pi {
+        d += 2.0 * pi
+    }
+    abs(d)
+}
+
+fn runCase(_ t: bind Tally, _ k: Int, _ c: Case) {
+    var vp = viewport.Viewport(width: c.width, height: c.height, centerX: c.centerX, centerY: c.centerY, scale: c.scale, angle: c.angle, yDown: c.yDown, fitFirst: false, smooth: false)
+    if c.content.count == 4 {
+        vp.content = viewport.box(c.content[0], c.content[1], c.content[2], c.content[3])
+        vp.keepInSight = c.keepInSight
+    }
+    for s in c.steps {
+        let a = s.args
+        match s.op {
+            "pan" -> vp.pan(a[0], a[1])
+            "zoom" -> vp.zoom(by: a[0], a[1], a[2])
+            "rotate" -> vp.rotate(by: a[0], a[1], a[2])
+            "resize" -> vp.resize(a[0], a[1])
+            "fit" -> vp.fit(viewport.box(a[0], a[1], a[2], a[3]))
+            "box" -> vp.zoomToScreenBox(a[0], a[1], a[2], a[3])
+            "scale" -> vp.setScale(a[0])
+            "angle" -> vp.setAngle(a[0])
+            _ -> t.fail("case {k}: no step {s.op}")
+        }
+    }
+    // Screen points are compared to about a millionth of a point per
+    // thousand points of size; world points to the same share of the
+    // world the canvas shows.
+    let span = max(vp.width, vp.height) / vp.scale
+    for (i, p) in c.worlds.enumerated() {
+        let (sx, sy) = vp.toScreen(p[0], p[1])
+        t.check("case {k} toScreen {i} x", sx, c.toScreen[i][0], size: 1000.0)
+        t.check("case {k} toScreen {i} y", sy, c.toScreen[i][1], size: 1000.0)
+    }
+    for (i, p) in c.screens.enumerated() {
+        let (x, y) = vp.toWorld(p[0], p[1])
+        t.check("case {k} toWorld {i} x", x, c.toWorld[i][0], size: span)
+        t.check("case {k} toWorld {i} y", y, c.toWorld[i][1], size: span)
+    }
+    t.check("case {k} centerX", vp.centerX, c.endCenterX, size: span)
+    t.check("case {k} centerY", vp.centerY, c.endCenterY, size: span)
+    t.check("case {k} scale", vp.scale, c.endScale)
+    t.checks += 1
+    if angleGap(vp.angle, c.endAngle) > 1e-7 {
+        t.fail("case {k} angle: got {vp.angle}, want {c.endAngle}")
+    }
+}
+
+fn testCases(_ t: bind Tally) {
+    let text = readFile("tests/cases.json") ?? ""
+    let loaded: Cases? = fromJson(text)
+    if loaded == nil {
+        t.fail("tests/cases.json can't be read: run from the library's folder")
+        return
+    }
+    for (k, c) in (loaded ?? Cases(cases: [])).cases.enumerated() {
+        runCase(t, k, c)
+    }
+}
+
+fn testBox(_ t: bind Tally) {
+    let b = viewport.box(10, 5, -2, 1)
+    t.check("box minX", b.minX, -2)
+    t.check("box maxY", b.maxY, 5)
+    t.check("box width", b.width(), 12)
+    t.check("box centerY", b.centerY(), 3)
+    t.checkTrue("box contains", b.contains(0, 2) && !b.contains(11, 2))
+    t.checkTrue("empty box", viewport.Box().empty && viewport.Box().width() == 0.0)
+    let around = viewport.boxAround([1, 2, 5, -1, 0.0 / 0.0, 4, 3, 9])
+    t.check("boxAround minY", around.minY, -1)
+    t.check("boxAround maxY", around.maxY, 9)
+    t.checkTrue("union", viewport.box(0, 0, 1, 1).union(viewport.box(4, 4, 5, 6)).maxY == 6.0)
+    t.checkTrue("union with empty", viewport.Box().union(b).minX == -2.0)
+    t.checkTrue("intersects", b.intersects(viewport.box(9, 4, 20, 20)) && !b.intersects(viewport.box(11, 0, 12, 1)))
+    t.check("padded", b.padded(1).minX, -3)
+}
+
+fn testConversions(_ t: bind Tally) {
+    var vp = viewport.Viewport(width: 400, height: 300, centerX: 10, centerY: 20, scale: 2)
+    let (sx, sy) = vp.toScreen(10, 20)
+    t.check("middle x", sx, 200)
+    t.check("middle y", sy, 150)
+    // y up: a point above the middle is higher on the screen.
+    t.check("y up", vp.screenY(10, 30), 130)
+    vp.yDown = true
+    t.check("y down", vp.screenY(10, 30), 170)
+    vp.yDown = false
+    // A quarter turn: the world's +x points up the screen.
+    vp.angle = pi / 2.0
+    t.check("turned x", vp.screenX(15, 20), 200, size: 400)
+    t.check("turned y", vp.screenY(15, 20), 140)
+    let (wx, wy) = vp.toWorld(vp.screenX(3, 4), vp.screenY(3, 4))
+    t.check("round trip x", wx, 3)
+    t.check("round trip y", wy, 4)
+    t.checkTrue("toScreenPoints", vp.toScreenPoints([15, 20, 10, 20]).count == 4)
+    t.check("points", vp.points(5), 10)
+    t.check("length", vp.length(10), 5)
+    vp.angle = 0.0
+    let v = vp.visible()
+    t.check("visible minX", v.minX, -90)
+    t.check("visible maxY", v.maxY, 95)
+    let s = vp.onScreen(viewport.box(10, 20, 20, 30))
+    t.check("onScreen minY", s.minY, 130)
+    t.check("onScreen maxX", s.maxX, 220)
+}
+
+fn testMoves(_ t: bind Tally) {
+    var vp = viewport.Viewport(width: 400, height: 300, scale: 1, smooth: false)
+    // A point under the mouse stays under it while zooming.
+    let (x, y) = vp.toWorld(50, 60)
+    vp.zoom(by: 3, 50, 60)
+    t.check("zoom keeps the point x", vp.worldX(50, 60), x)
+    t.check("zoom keeps the point y", vp.worldY(50, 60), y)
+    t.check("zoom scale", vp.scale, 3)
+    // Limits.
+    vp.maxScale = 10
+    vp.zoom(by: 100, 0, 0)
+    t.check("maxScale", vp.scale, 10)
+    vp.minScale = 0.5
+    vp.setScale(0.01)
+    t.check("minScale", vp.scale, 0.5)
+    vp.zoom(by: -2, 0, 0)
+    t.check("a zoom by a negative factor does nothing", vp.scale, 0.5)
+    // Fit: the box fills the room inside the margins.
+    vp.minScale = 0.000001
+    vp.maxScale = 1000000
+    vp.fit(viewport.box(0, 0, 100, 50))
+    t.check("fit scale", vp.scale, min(360.0 / 100.0, 260.0 / 50.0))
+    t.check("fit centerX", vp.centerX, 50)
+    t.check("fit centerY", vp.centerY, 25)
+    // A box of one point only pans.
+    let before = vp.scale
+    vp.fit(viewport.box(7, 8, 7, 8))
+    t.check("fit a point keeps the scale", vp.scale, before)
+    t.check("fit a point pans", vp.centerX, 7)
+    vp.fit(viewport.Box())
+    t.check("fit nothing does nothing", vp.centerX, 7)
+    // Pan follows the mouse.
+    let (ax, ay) = vp.toScreen(1, 1)
+    vp.pan(30, -10)
+    let (bx, by) = vp.toScreen(1, 1)
+    t.check("pan x", bx - ax, 30)
+    t.check("pan y", by - ay, -10)
+    // Resize keeps the middle.
+    let cx = vp.centerX
+    vp.resize(800, 100)
+    t.check("resize keeps the middle", vp.centerX, cx)
+    t.check("resize width", vp.width, 800)
+    // Rotation about a point keeps that point.
+    let (rx, ry) = vp.toWorld(100, 20)
+    vp.rotate(by: 0.7, 100, 20)
+    t.check("rotate keeps the point x", vp.worldX(100, 20), rx)
+    t.check("rotate keeps the point y", vp.worldY(100, 20), ry)
+    t.check("rotate angle", vp.angle, 0.7)
+    vp.setAngle(4.0)
+    t.check("angles stay within pi", vp.angle, 4.0 - 2.0 * pi)
+    vp.centerOn(-3, 9)
+    t.check("centerOn", vp.centerY, 9)
+    vp.show(1, 2, 5, 0)
+    t.checkTrue("show", vp.centerX == 1.0 && vp.scale == 5.0 && vp.angle == 0.0)
+    vp.zoomIn()
+    t.check("zoomIn", vp.scale, 7.5)
+    vp.zoomOut()
+    t.check("zoomOut", vp.scale, 5)
+    let s0 = vp.scale
+    vp.zoomToScreenBox(10, 10, 10.5, 200)
+    t.check("a box under a point wide does nothing", vp.scale, s0)
+}
+
+fn testFirstFit(_ t: bind Tally) {
+    var vp = viewport.Viewport(content: viewport.box(0, 0, 60, 40))
+    vp.resize(700, 480)
+    t.check("the first resize fits", vp.scale, 11)
+    t.checkTrue("at once", !vp.animating && vp.centerX == 30.0)
+    vp.zoomIn()
+    vp.finish()
+    vp.resize(800, 500)
+    t.check("later ones don't", vp.scale, 16.5)
+    var off = viewport.Viewport(content: viewport.box(0, 0, 60, 40), fitFirst: false)
+    off.resize(700, 480)
+    t.check("fitFirst: false", off.scale, 1)
+}
+
+fn testKeepInSight(_ t: bind Tally) {
+    var vp = viewport.Viewport(width: 400, height: 300, scale: 1, smooth: false)
+    vp.content = viewport.box(-50, -50, 50, 50)
+    vp.keepInSight = true
+    vp.pan(10000, 0)
+    let b = vp.onScreen(vp.content)
+    t.check("the content stays in sight on the right", b.minX, 360)
+    vp.pan(0, -10000)
+    t.check("and at the top", vp.onScreen(vp.content).maxY, 40)
+    // Content smaller than `sight` shows whole.
+    vp.content = viewport.box(0, 0, 10, 10)
+    vp.pan(-10000, 0)
+    t.check("small content shows whole", vp.onScreen(vp.content).maxX, 10)
+}
+
+fn ev(_ kind: PointerKind, x: Float = 100, y: Float = 100, dx: Float = 0, dy: Float = 0, button: PointerButton = .left, clicks: Int = 1, shift: Bool = false, command: Bool = false) -> PointerEvent {
+    PointerEvent(kind: kind, x: x, y: y, windowX: x, windowY: y, dx: dx, dy: dy, button: button, clicks: clicks, shift: shift, alt: false, command: command)
+}
+
+fn testHandle(_ t: bind Tally) {
+    var vp = viewport.Viewport(width: 400, height: 300, scale: 2, smooth: false)
+    // The wheel zooms about the mouse.
+    let (x, y) = vp.toWorld(80, 40)
+    t.checkTrue("scroll is used", vp.handle(ev(.scroll, x: 80, y: 40, dy: -50)))
+    t.checkTrue("scrolling up zooms in", vp.scale > 2.0)
+    t.check("scroll keeps the point", vp.worldX(80, 40), x)
+    t.check("scroll keeps the point y", vp.worldY(80, 40), y)
+    // With Cmd, it pans.
+    let cx = vp.centerX
+    let s = vp.scale
+    let _a = vp.handle(ev(.scroll, dx: 20, dy: 0, command: true))
+    t.check("cmd+scroll pans", (cx - vp.centerX) * s, -20)
+    vp.wheel = .pans
+    let cy = vp.centerY
+    let _b = vp.handle(ev(.scroll, dx: 0, dy: 30))
+    t.check("wheel .pans: scrolling down shows what's below", (cy - vp.centerY) * s, 30)
+    // A pinch zooms.
+    let _c = vp.handle(ev(.pinch, dy: 0.5))
+    t.check("pinch", vp.scale, s * 1.5)
+    // A left drag pans.
+    vp.scale = 1
+    vp.centerX = 0
+    vp.centerY = 0
+    t.checkTrue("down is used", vp.handle(ev(.down)))
+    let _d = vp.handle(ev(.drag, x: 110, y: 105, dx: 10, dy: 5))
+    t.checkTrue("up is used", vp.handle(ev(.up, x: 110, y: 105)))
+    t.check("drag pans x", vp.centerX, -10)
+    t.check("drag pans y", vp.centerY, 5)
+    t.checkTrue("a move is the app's", !vp.handle(ev(.move)))
+    // Without leftDragPans, left presses are the app's; the middle pans.
+    vp.leftDragPans = false
+    t.checkTrue("left is the app's", !vp.handle(ev(.down)))
+    t.checkTrue("a drag after it is the app's", !vp.handle(ev(.drag, dx: 5)))
+    t.checkTrue("middle is used", vp.handle(ev(.down, button: .middle)))
+    let _e = vp.handle(ev(.drag, dx: 4, button: .middle))
+    let _f = vp.handle(ev(.up, button: .middle))
+    t.check("middle drag pans", vp.centerX, -14)
+    // The right button is the app's unless the view rotates.
+    t.checkTrue("right is the app's", !vp.handle(ev(.down, button: .right)))
+    vp.rotates = true
+    t.checkTrue("right turns", vp.handle(ev(.down, x: 300, y: 150, button: .right)))
+    // From straight right of the middle to straight above it: a quarter turn.
+    let _g = vp.handle(ev(.drag, x: 200, y: 50, dx: -100, dy: -100, button: .right))
+    let _h = vp.handle(ev(.up, x: 200, y: 50, button: .right))
+    t.check("right drag turns", vp.angle, pi / 2.0)
+    vp.angle = 0
+    // Shift and a drag zooms into a box.
+    vp.leftDragPans = true
+    vp.scale = 1
+    t.checkTrue("shift down", vp.handle(ev(.down, x: 0, y: 0, shift: true)))
+    let _i = vp.handle(ev(.drag, x: 100, y: 75, dx: 100, dy: 75))
+    let b = vp.zoomBox()
+    t.checkTrue("the zoom box shows", !b.empty && b.maxX == 100.0)
+    let (bx, by) = vp.toWorld(50, 37.5)
+    let _j = vp.handle(ev(.up, x: 100, y: 75))
+    t.check("box zoom scale", vp.scale, 4)
+    t.check("box zoom center x", vp.centerX, bx)
+    t.check("box zoom center y", vp.centerY, by)
+    t.checkTrue("the zoom box is gone", vp.zoomBox().empty)
+    // A double click fits the content.
+    vp.content = viewport.box(0, 0, 36, 26)
+    let _k = vp.handle(ev(.down, clicks: 2))
+    let _l = vp.handle(ev(.up, clicks: 2))
+    t.check("double click fits", vp.scale, 10)
+    t.check("double click centers", vp.centerX, 18)
+}
+
+fn testKeys(_ t: bind Tally) {
+    var vp = viewport.Viewport(width: 400, height: 300, scale: 2, smooth: false)
+    t.checkTrue("+ is used", vp.handleKey("+"))
+    t.check("+ zooms in", vp.scale, 3)
+    let _a = vp.handleKey("-")
+    t.check("- zooms out", vp.scale, 2)
+    t.checkTrue("0 without content is the app's", !vp.handleKey("0"))
+    vp.content = viewport.box(0, 0, 36, 26)
+    let _b = vp.handleKey("0")
+    t.check("0 fits", vp.scale, 10)
+    let x0 = vp.centerX
+    let _c = vp.handleKey("left")
+    t.check("left shows what's to the left", vp.centerX, x0 - 5)
+    let y0 = vp.centerY
+    let _d = vp.handleKey("up")
+    t.check("up shows what's above", vp.centerY, y0 + 3.75)
+    t.checkTrue("[ is the app's unless the view rotates", !vp.handleKey("["))
+    vp.rotates = true
+    let _e = vp.handleKey("[")
+    t.check("[ turns", vp.angle, vp.rotateStep)
+    t.checkTrue("other keys are the app's", !vp.handleKey("x"))
+}
+
+fn testSmooth(_ t: bind Tally) {
+    var vp = viewport.Viewport(width: 400, height: 300, scale: 1)
+    vp.fit(viewport.box(0, 0, 36, 26))
+    t.checkTrue("a smooth fit starts a move", vp.animating && vp.scale == 1.0)
+    vp.tick(seconds: 0.125)
+    t.checkTrue("half way it's between", vp.scale > 1.0 && vp.scale < 10.0)
+    vp.tick(seconds: 1.0)
+    t.checkTrue("the move ends", !vp.animating)
+    t.check("where it was going", vp.scale, 10)
+    t.check("where it was going x", vp.centerX, 18)
+    // A zoom keeps the point that's still at both ends still all along.
+    vp.zoomToScreenBox(0, 0, 200, 150)
+    let (fx, fy) = vp.toWorld(0, 0)
+    vp.tick(seconds: 0.1)
+    t.check("the zoom box's corner stays x", vp.worldX(0, 0), fx)
+    t.check("the zoom box's corner stays y", vp.worldY(0, 0), fy)
+    vp.finish()
+    t.check("finish", vp.scale, 20)
+    // Steps add up while a move is under way.
+    vp.zoomIn()
+    vp.zoomIn()
+    t.check("two steps", vp.toScale, 45)
+    vp.stop()
+    t.checkTrue("stop", !vp.animating && vp.scale == 20.0)
+    // A turn takes the short way round.
+    vp.rotates = true
+    vp.angle = 3.0
+    vp.show(vp.centerX, vp.centerY, vp.scale, -3.0)
+    vp.tick(seconds: 0.125)
+    t.checkTrue("the short way", abs(vp.angle) > 3.0)
+    vp.finish()
+    t.check("the end angle", vp.angle, -3.0)
+    // tick does nothing when there's no move; a move takes 15 ticks.
+    vp.tick()
+    t.check("tick", vp.angle, -3.0)
+    vp.zoomIn()
+    for _ in 0..14 {
+        vp.tick()
+    }
+    t.checkTrue("14 ticks: still moving", vp.animating)
+    vp.tick()
+    t.checkTrue("15 ticks: there", !vp.animating && near(vp.scale, 30.0))
+    t.check("tick", vp.angle, -3.0)
+}
+
+fn testSteps(_ t: bind Tally) {
+    t.check("niceStep 37", viewport.niceStep(37), 50)
+    t.check("niceStep 1", viewport.niceStep(1), 1)
+    t.check("niceStep 0.013", viewport.niceStep(0.013), 0.02)
+    t.check("niceStep 6", viewport.niceStep(6), 10)
+    t.check("niceStep 0", viewport.niceStep(0), 1)
+    let vp = viewport.Viewport(scale: 4)
+    t.check("gridStep", viewport.gridStep(vp, spacing: 100), 50)
+    t.checkText("label", viewport.tickLabel(0.30000000000000004, step: 0.1), "0.3")
+    t.checkText("label 0", viewport.tickLabel(-1e-17, step: 0.25), "0.00")
+    t.checkText("label whole", viewport.tickLabel(1500, step: 500), "1500")
+    t.checkText("label large", viewport.tickLabel(2500000, step: 500000), "2.5e6")
+    t.checkText("label small", viewport.tickLabel(0.00002, step: 0.00001), "2e-5")
+    let m = viewport.scaleBar(viewport.Viewport(scale: 2), maxWidth: 120, unit: "m")
+    t.check("scale bar length", m.length, 50)
+    t.check("scale bar points", m.points, 100)
+    t.checkText("scale bar label", m.label, "50 m")
+    t.checkText("km", viewport.scaleBar(viewport.Viewport(scale: 0.01), unit: "m").label, "10 km")
+    t.checkText("mm", viewport.scaleBar(viewport.Viewport(scale: 30000), unit: "m").label, "2 mm")
+    t.checkText("no unit", viewport.scaleBar(viewport.Viewport(scale: 2)).label, "50")
+    t.checkText("ft", viewport.scaleBar(viewport.Viewport(scale: 0.5), unit: "ft").label, "200 ft")
+}
+
+fn main() {
+    var t = Tally()
+    testCases(t)
+    testBox(t)
+    testConversions(t)
+    testMoves(t)
+    testFirstFit(t)
+    testKeepInSight(t)
+    testHandle(t)
+    testKeys(t)
+    testSmooth(t)
+    testSteps(t)
+    print("{t.checks - t.failures} of {t.checks} checks passed")
+    if t.failures > 0 {
+        exit(1)
+    }
+}
